@@ -27,15 +27,14 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  // getUser() vérifie le jeton auprès de Supabase (plus sûr que getSession)
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
   const isPublic = PUBLIC_PATHS.includes(path);
+  const isApi = path.startsWith("/api/");
 
-  // Redirection qui conserve les cookies de session éventuellement rafraîchis
   function redirectTo(target: string) {
     const redirect = NextResponse.redirect(new URL(target, request.url));
     response.cookies.getAll().forEach((cookie) => {
@@ -44,11 +43,28 @@ export async function proxy(request: NextRequest) {
     return redirect;
   }
 
-  if (!user && !isPublic) {
+  if (!user && !isPublic && !isApi) {
     return redirectTo("/login");
   }
   if (user && isPublic) {
     return redirectTo("/dashboard");
+  }
+
+  // Mot de passe temporaire : tout est bloqué sauf la page de changement
+  if (user && !isApi) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("must_change_password")
+      .eq("id", user.id)
+      .single();
+
+    const mustChange = profile?.must_change_password === true;
+    if (mustChange && path !== "/change-password") {
+      return redirectTo("/change-password");
+    }
+    if (!mustChange && path === "/change-password") {
+      return redirectTo("/dashboard");
+    }
   }
 
   return response;

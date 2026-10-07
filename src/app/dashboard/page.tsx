@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { LogoutButton } from "./logout-button";
+import Link from "next/link";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -20,6 +21,13 @@ export default async function DashboardPage() {
         Bonjour {profile?.first_name} {profile?.last_name} ({profile?.role})
       </p>
       <LogoutButton />
+      {profile?.role === "owner" && (
+        <p>
+          <Link href="/team" className="underline">
+            Gérer l'équipe
+          </Link>
+        </p>
+      )}
     </main>
   );
 }
