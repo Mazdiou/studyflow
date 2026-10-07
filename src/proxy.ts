@@ -43,28 +43,37 @@ export async function proxy(request: NextRequest) {
     return redirect;
   }
 
-  if (!user && !isPublic && !isApi) {
-    return redirectTo("/login");
+  // Visiteur non connecté
+  if (!user) {
+    if (!isPublic && !isApi) return redirectTo("/login");
+    return response;
   }
-  if (user && isPublic) {
-    return redirectTo("/dashboard");
+
+  // Les routes API vérifient elles-mêmes l'appelant
+  if (isApi) return response;
+
+  // Le RLS ne renvoie aucun profil à un compte désactivé (ou sans profil)
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("must_change_password")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!profile) {
+    await supabase.auth.signOut();
+    // Sur une page publique on ne redirige pas : aucune boucle possible
+    return isPublic ? response : redirectTo("/login");
   }
+
+  if (isPublic) return redirectTo("/dashboard");
 
   // Mot de passe temporaire : tout est bloqué sauf la page de changement
-  if (user && !isApi) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("must_change_password")
-      .eq("id", user.id)
-      .single();
-
-    const mustChange = profile?.must_change_password === true;
-    if (mustChange && path !== "/change-password") {
-      return redirectTo("/change-password");
-    }
-    if (!mustChange && path === "/change-password") {
-      return redirectTo("/dashboard");
-    }
+  const mustChange = profile.must_change_password === true;
+  if (mustChange && path !== "/change-password") {
+    return redirectTo("/change-password");
+  }
+  if (!mustChange && path === "/change-password") {
+    return redirectTo("/dashboard");
   }
 
   return response;

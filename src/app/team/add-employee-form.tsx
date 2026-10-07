@@ -35,8 +35,9 @@ export function AddEmployeeForm() {
     });
     setLoading(false);
 
-    const data = await res.json();
-    if (!res.ok) return setError(data.error ?? "Erreur inconnue");
+    const data = await res.json().catch(() => null);
+    if (!res.ok)
+      return setError(data?.error ?? `Erreur serveur (${res.status})`);
 
     setCreated({ email, password: data.temporaryPassword });
     formEl.reset();

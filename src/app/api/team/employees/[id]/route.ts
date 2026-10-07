@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logActivity } from "@/lib/audit";
 
 export async function DELETE(
   _request: Request,
@@ -32,7 +33,7 @@ export async function DELETE(
   // La cible doit appartenir à l'agence de l'appelant
   const { data: target } = await admin
     .from("profiles")
-    .select("id, role, is_active")
+    .select("id, role, is_active, first_name, last_name")
     .eq("id", id)
     .eq("agency_id", caller.profile.agency_id)
     .single();
@@ -65,6 +66,15 @@ export async function DELETE(
       { status: 409 },
     );
   }
+
+  await logActivity(admin, {
+    agencyId: caller.profile.agency_id,
+    actorId: caller.user.id,
+    action: "employee.deleted",
+    targetType: "profile",
+    targetId: id,
+    details: { first_name: target.first_name, last_name: target.last_name },
+  });
 
   return NextResponse.json({ ok: true });
 }

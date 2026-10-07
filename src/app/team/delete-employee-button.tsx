@@ -25,7 +25,10 @@ export function DeleteEmployeeButton({
     setLoading(true);
     const res = await fetch(`/api/team/employees/${id}`, { method: "DELETE" });
     setLoading(false);
-    if (!res.ok) alert((await res.json()).error ?? "Erreur");
+    if (!res.ok)
+      alert(
+        (await res.json().catch(() => null))?.error ?? `Erreur ${res.status}`,
+      );
     router.refresh();
   }
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import Link from "next/link";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -49,13 +50,19 @@ export default function RegisterPage() {
     setLoading(false);
 
     if (res.ok) setDone(true);
-    else setError((await res.json()).error ?? "Erreur inconnue");
+    else
+      setError(
+        (await res.json().catch(() => null))?.error ?? `Erreur ${res.status}`,
+      );
   }
 
   if (done) {
     return (
-      <main className="p-8">
-        Compte créé. La page de connexion arrive à l'étape suivante.
+      <main className="space-y-2 p-8">
+        <p>Compte créé.</p>
+        <Link href="/login" className="underline">
+          Se connecter
+        </Link>
       </main>
     );
   }

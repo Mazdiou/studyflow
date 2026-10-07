@@ -32,7 +32,10 @@ export default function ChangePasswordPage() {
     });
     setLoading(false);
 
-    if (!res.ok) return setError((await res.json()).error ?? "Erreur inconnue");
+    if (!res.ok)
+      return setError(
+        (await res.json().catch(() => null))?.error ?? `Erreur ${res.status}`,
+      );
     router.replace("/dashboard");
     router.refresh();
   }

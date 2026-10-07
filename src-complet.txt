@@ -1,0 +1,1305 @@
+
+===== C:\dev\studyflow\src\app\api\auth\change-password\route.ts =====
+
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+const schema = z.object({ password: z.string().min(8).max(72) });
+
+export async function POST(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Non connecté" }, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Mot de passe invalide (8 caractères minimum)" },
+      { status: 400 },
+    );
+  }
+
+  const admin = createAdminClient();
+  const { error: pwError } = await admin.auth.admin.updateUserById(user.id, {
+    password: parsed.data.password,
+  });
+  if (pwError) {
+    return NextResponse.json(
+      { error: "Changement impossible" },
+      { status: 500 },
+    );
+  }
+
+  const { error: flagError } = await admin
+    .from("profiles")
+    .update({ must_change_password: false })
+    .eq("id", user.id);
+  if (flagError) {
+    return NextResponse.json(
+      { error: "Changement impossible" },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+===== C:\dev\studyflow\src\app\api\auth\register\route.ts =====
+
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { logActivity } from "@/lib/audit";
+
+const schema = z.object({
+  agencyName: z.string().trim().min(1).max(100),
+  city: z.string().trim().min(1).max(100),
+  phone: z.string().trim().min(6).max(30),
+  firstName: z.string().trim().min(1).max(100),
+  lastName: z.string().trim().min(1).max(100),
+  email: z.string().trim().toLowerCase().email().max(254),
+  password: z.string().min(8).max(72),
+});
+
+export async function POST(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
+  }
+
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Données invalides" }, { status: 400 });
+  }
+  const d = parsed.data;
+
+  const admin = createAdminClient();
+
+  // 1. Création du compte Auth
+  const { data: created, error: authError } = await admin.auth.admin.createUser(
+    {
+      email: d.email,
+      password: d.password,
+      email_confirm: true,
+    },
+  );
+
+  if (authError || !created.user) {
+    return NextResponse.json(
+      { error: "Impossible de créer le compte (e-mail déjà utilisé ?)" },
+      { status: 400 },
+    );
+  }
+
+  // 2. Création de l'agence et du profil patron
+  const { data: agencyId, error: rpcError } = await admin.rpc(
+    "create_agency_with_owner",
+    {
+      p_user_id: created.user.id,
+      p_agency_name: d.agencyName,
+      p_city: d.city,
+      p_phone: d.phone,
+      p_first_name: d.firstName,
+      p_last_name: d.lastName,
+    },
+  );
+
+  // 3. Si échec : on supprime le compte Auth créé
+  if (rpcError || !agencyId) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    return NextResponse.json(
+      { error: "Erreur lors de la création de l'agence" },
+      { status: 500 },
+    );
+  }
+
+  await logActivity(admin, {
+    agencyId: agencyId as string,
+    actorId: created.user.id,
+    action: "agency.created",
+    targetType: "agency",
+    targetId: agencyId as string,
+    details: { agency_name: d.agencyName },
+  });
+
+  return NextResponse.json({ ok: true }, { status: 201 });
+}
+
+===== C:\dev\studyflow\src\app\api\team\employees\[id]\status\route.ts =====
+
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { requireOwner } from "@/lib/auth/require-owner";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { logActivity } from "@/lib/audit";
+
+const schema = z.object({ isActive: z.boolean() });
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const caller = await requireOwner();
+  if (!caller) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+
+  const { id } = await params;
+  if (!z.string().uuid().safeParse(id).success) {
+    return NextResponse.json(
+      { error: "Identifiant invalide" },
+      { status: 400 },
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Données invalides" }, { status: 400 });
+  }
+  const { isActive } = parsed.data;
+
+  // Un patron ne peut pas se désactiver lui-même : l'agence garde
+  // donc toujours au moins un patron actif (l'appelant).
+  if (id === caller.user.id) {
+    return NextResponse.json(
+      { error: "Vous ne pouvez pas modifier votre propre statut" },
+      { status: 400 },
+    );
+  }
+
+  const admin = createAdminClient();
+
+  // La cible doit appartenir à l'agence de l'appelant
+  const { data: target } = await admin
+    .from("profiles")
+    .select("id, is_active, first_name, last_name")
+    .eq("id", id)
+    .eq("agency_id", caller.profile.agency_id)
+    .single();
+
+  if (!target) {
+    return NextResponse.json({ error: "Employé introuvable" }, { status: 404 });
+  }
+  if (target.is_active === isActive) {
+    return NextResponse.json({ ok: true });
+  }
+
+  // 1. Bloquer ou débloquer le compte côté Auth
+  const { error: banError } = await admin.auth.admin.updateUserById(id, {
+    ban_duration: isActive ? "none" : "876000h",
+  });
+  if (banError) {
+    return NextResponse.json(
+      { error: "Opération impossible" },
+      { status: 500 },
+    );
+  }
+
+  // 2. Mettre à jour le profil (annule le blocage Auth si ça échoue)
+  const { error: updateError } = await admin
+    .from("profiles")
+    .update({ is_active: isActive })
+    .eq("id", id)
+    .eq("agency_id", caller.profile.agency_id);
+
+  if (updateError) {
+    await admin.auth.admin.updateUserById(id, {
+      ban_duration: isActive ? "876000h" : "none",
+    });
+    return NextResponse.json(
+      { error: "Opération impossible" },
+      { status: 500 },
+    );
+  }
+
+  await logActivity(admin, {
+    agencyId: caller.profile.agency_id,
+    actorId: caller.user.id,
+    action: isActive ? "employee.reactivated" : "employee.deactivated",
+    targetType: "profile",
+    targetId: id,
+    details: { first_name: target.first_name, last_name: target.last_name },
+  });
+
+  return NextResponse.json({ ok: true });
+}
+
+===== C:\dev\studyflow\src\app\api\team\employees\[id]\route.ts =====
+
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { requireOwner } from "@/lib/auth/require-owner";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const caller = await requireOwner();
+  if (!caller) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+
+  const { id } = await params;
+  if (!z.string().uuid().safeParse(id).success) {
+    return NextResponse.json(
+      { error: "Identifiant invalide" },
+      { status: 400 },
+    );
+  }
+
+  if (id === caller.user.id) {
+    return NextResponse.json(
+      { error: "Vous ne pouvez pas supprimer votre propre compte" },
+      { status: 400 },
+    );
+  }
+
+  const admin = createAdminClient();
+
+  // La cible doit appartenir à l'agence de l'appelant
+  const { data: target } = await admin
+    .from("profiles")
+    .select("id, role, is_active")
+    .eq("id", id)
+    .eq("agency_id", caller.profile.agency_id)
+    .single();
+
+  if (!target) {
+    return NextResponse.json({ error: "Employé introuvable" }, { status: 404 });
+  }
+  if (target.role !== "employee") {
+    return NextResponse.json(
+      { error: "Seuls les comptes employés peuvent être supprimés" },
+      { status: 400 },
+    );
+  }
+  if (target.is_active) {
+    return NextResponse.json(
+      { error: "Désactivez d'abord ce compte avant de le supprimer" },
+      { status: 400 },
+    );
+  }
+
+  // Supprime le compte Auth ; le profil est supprimé en cascade.
+  // Si le compte a de l'historique (phases suivantes), la base refuse.
+  const { error } = await admin.auth.admin.deleteUser(id);
+  if (error) {
+    return NextResponse.json(
+      {
+        error:
+          "Suppression impossible : ce compte a peut-être un historique. Gardez-le désactivé.",
+      },
+      { status: 409 },
+    );
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+===== C:\dev\studyflow\src\app\api\team\employees\route.ts =====
+
+import { NextResponse } from "next/server";
+import { randomInt } from "node:crypto";
+import { z } from "zod";
+import { requireOwner } from "@/lib/auth/require-owner";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { logActivity } from "@/lib/audit";
+
+const schema = z.object({
+  firstName: z.string().trim().min(1).max(100),
+  lastName: z.string().trim().min(1).max(100),
+  email: z.string().trim().toLowerCase().email().max(254),
+});
+
+// Sans caractères ambigus (0/O, 1/l/I) pour faciliter la communication
+const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+
+function generateTemporaryPassword(length = 12) {
+  let out = "";
+  for (let i = 0; i < length; i++) out += ALPHABET[randomInt(ALPHABET.length)];
+  return out;
+}
+
+export async function POST(request: Request) {
+  const caller = await requireOwner();
+  if (!caller) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Données invalides" }, { status: 400 });
+  }
+  const d = parsed.data;
+
+  const admin = createAdminClient();
+  const temporaryPassword = generateTemporaryPassword();
+
+  const { data: created, error: authError } = await admin.auth.admin.createUser(
+    {
+      email: d.email,
+      password: temporaryPassword,
+      email_confirm: true,
+    },
+  );
+  if (authError || !created.user) {
+    return NextResponse.json(
+      { error: "Impossible de créer le compte (e-mail déjà utilisé ?)" },
+      { status: 400 },
+    );
+  }
+
+  // L'agence vient du profil du patron connecté, jamais du navigateur
+  const { error: profileError } = await admin.from("profiles").insert({
+    id: created.user.id,
+    agency_id: caller.profile.agency_id,
+    first_name: d.firstName,
+    last_name: d.lastName,
+    role: "employee",
+    must_change_password: true,
+  });
+
+  if (profileError) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    return NextResponse.json(
+      { error: "Erreur lors de la création de l'employé" },
+      { status: 500 },
+    );
+  }
+
+  await logActivity(admin, {
+    agencyId: caller.profile.agency_id,
+    actorId: caller.user.id,
+    action: "employee.created",
+    targetType: "profile",
+    targetId: created.user.id,
+    details: { first_name: d.firstName, last_name: d.lastName },
+  });
+
+  // Le mot de passe temporaire n'est renvoyé qu'une seule fois, au patron
+  return NextResponse.json({ ok: true, temporaryPassword }, { status: 201 });
+}
+
+===== C:\dev\studyflow\src\app\change-password\page.tsx =====
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+export default function ChangePasswordPage() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const form = new FormData(e.currentTarget);
+    const password = String(form.get("password"));
+    const confirm = String(form.get("confirm"));
+
+    if (password.length < 8)
+      return setError("Mot de passe trop court (8 minimum).");
+    if (password !== confirm)
+      return setError("Les mots de passe ne correspondent pas.");
+
+    setLoading(true);
+    const res = await fetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    setLoading(false);
+
+    if (!res.ok) return setError((await res.json()).error ?? "Erreur inconnue");
+    router.replace("/dashboard");
+    router.refresh();
+  }
+
+  return (
+    <main className="mx-auto max-w-md p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Choisissez votre mot de passe</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div className="space-y-1">
+              <Label htmlFor="password">Nouveau mot de passe</Label>
+              <Input id="password" name="password" type="password" required />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="confirm">Confirmer le mot de passe</Label>
+              <Input id="confirm" name="confirm" type="password" required />
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? "Enregistrement..." : "Enregistrer"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+===== C:\dev\studyflow\src\app\dashboard\logout-button.tsx =====
+
+"use client";
+
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+
+export function LogoutButton() {
+  const router = useRouter();
+
+  async function logout() {
+    await createClient().auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  }
+
+  return (
+    <Button variant="outline" onClick={logout}>
+      Se déconnecter
+    </Button>
+  );
+}
+
+===== C:\dev\studyflow\src\app\dashboard\page.tsx =====
+
+import { createClient } from "@/lib/supabase/server";
+import { LogoutButton } from "./logout-button";
+import Link from "next/link";
+
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("first_name, last_name, role, agencies(name, city)")
+    .eq("id", user!.id)
+    .single();
+
+  return (
+    <main className="p-8 space-y-4">
+      <h1 className="text-2xl font-bold">Tableau de bord</h1>
+      <p>
+        Bonjour {profile?.first_name} {profile?.last_name} ({profile?.role})
+      </p>
+      <LogoutButton />
+      {profile?.role === "owner" && (
+        <p>
+          <Link href="/team" className="underline">
+            Gérer l'équipe
+          </Link>
+        </p>
+      )}
+    </main>
+  );
+}
+
+===== C:\dev\studyflow\src\app\login\page.tsx =====
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const form = new FormData(e.currentTarget);
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: String(form.get("email")).trim().toLowerCase(),
+      password: String(form.get("password")),
+    });
+    setLoading(false);
+
+    if (error) return setError("E-mail ou mot de passe incorrect.");
+    router.replace("/dashboard");
+    router.refresh();
+  }
+
+  return (
+    <main className="mx-auto max-w-md p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Connexion</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div className="space-y-1">
+              <Label htmlFor="email">E-mail</Label>
+              <Input id="email" name="email" type="email" required />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="password">Mot de passe</Label>
+              <Input id="password" name="password" type="password" required />
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? "Connexion..." : "Se connecter"}
+            </Button>
+            <p className="text-sm">
+              Pas encore de compte ?{" "}
+              <Link href="/register" className="underline">
+                Inscrire mon agence
+              </Link>
+            </p>
+          </form>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+===== C:\dev\studyflow\src\app\register\page.tsx =====
+
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+const fields = [
+  { name: "agencyName", label: "Nom de l'agence", type: "text" },
+  { name: "city", label: "Ville", type: "text" },
+  { name: "phone", label: "Téléphone de l'agence", type: "tel" },
+  { name: "firstName", label: "Prénom", type: "text" },
+  { name: "lastName", label: "Nom", type: "text" },
+  { name: "email", label: "E-mail", type: "email" },
+  {
+    name: "password",
+    label: "Mot de passe (8 caractères minimum)",
+    type: "password",
+  },
+  { name: "confirm", label: "Confirmer le mot de passe", type: "password" },
+] as const;
+
+export default function RegisterPage() {
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const data = Object.fromEntries(new FormData(e.currentTarget)) as Record<
+      string,
+      string
+    >;
+
+    if (data.password.length < 8)
+      return setError("Mot de passe trop court (8 minimum).");
+    if (data.password !== data.confirm)
+      return setError("Les mots de passe ne correspondent pas.");
+
+    setLoading(true);
+    const { confirm, ...payload } = data;
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setLoading(false);
+
+    if (res.ok) setDone(true);
+    else setError((await res.json()).error ?? "Erreur inconnue");
+  }
+
+  if (done) {
+    return (
+      <main className="p-8">
+        Compte créé. La page de connexion arrive à l'étape suivante.
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-md p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Inscrire mon agence</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-4">
+            {fields.map((f) => (
+              <div key={f.name} className="space-y-1">
+                <Label htmlFor={f.name}>{f.label}</Label>
+                <Input id={f.name} name={f.name} type={f.type} required />
+              </div>
+            ))}
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? "Création..." : "Créer mon compte"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+===== C:\dev\studyflow\src\app\team\add-employee-form.tsx =====
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+export function AddEmployeeForm() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [created, setCreated] = useState<{
+    email: string;
+    password: string;
+  } | null>(null);
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setCreated(null);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
+    const email = String(form.get("email"));
+
+    setLoading(true);
+    const res = await fetch("/api/team/employees", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        firstName: form.get("firstName"),
+        lastName: form.get("lastName"),
+        email,
+      }),
+    });
+    setLoading(false);
+
+    const data = await res.json();
+    if (!res.ok) return setError(data.error ?? "Erreur inconnue");
+
+    setCreated({ email, password: data.temporaryPassword });
+    formEl.reset();
+    router.refresh();
+  }
+
+  return (
+    <div className="space-y-4">
+      <form onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-3">
+        <div className="space-y-1">
+          <Label htmlFor="firstName">Prénom</Label>
+          <Input id="firstName" name="firstName" required />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="lastName">Nom</Label>
+          <Input id="lastName" name="lastName" required />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="email">E-mail</Label>
+          <Input id="email" name="email" type="email" required />
+        </div>
+        <div className="sm:col-span-3">
+          <Button type="submit" disabled={loading}>
+            {loading ? "Création..." : "Créer le compte"}
+          </Button>
+        </div>
+      </form>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {created && (
+        <div className="rounded-md border border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-medium">Compte créé pour {created.email}</p>
+          <p className="mt-1">
+            Mot de passe temporaire :{" "}
+            <code className="font-mono text-base">{created.password}</code>
+          </p>
+          <p className="mt-1">
+            Notez-le maintenant : il ne sera plus affiché. L'employé devra en
+            choisir un nouveau à sa première connexion.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+===== C:\dev\studyflow\src\app\team\delete-employee-button.tsx =====
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+
+export function DeleteEmployeeButton({
+  id,
+  name,
+}: {
+  id: string;
+  name: string;
+}) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  async function remove() {
+    if (
+      !confirm(
+        `Supprimer définitivement le compte de ${name} ? Cette action est irréversible.`,
+      )
+    ) {
+      return;
+    }
+    setLoading(true);
+    const res = await fetch(`/api/team/employees/${id}`, { method: "DELETE" });
+    setLoading(false);
+    if (!res.ok) alert((await res.json()).error ?? "Erreur");
+    router.refresh();
+  }
+
+  return (
+    <Button variant="destructive" size="sm" onClick={remove} disabled={loading}>
+      Supprimer
+    </Button>
+  );
+}
+
+===== C:\dev\studyflow\src\app\team\page.tsx =====
+
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { DeleteEmployeeButton } from "./delete-employee-button";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOwner } from "@/lib/auth/require-owner";
+import { AddEmployeeForm } from "./add-employee-form";
+import { ToggleActiveButton } from "./toggle-active-button";
+
+export default async function TeamPage() {
+  const caller = await requireOwner();
+  if (!caller) redirect("/dashboard");
+
+  // Lecture via le RLS : uniquement les profils de l'agence du patron
+  const supabase = await createClient();
+  const { data: members } = await supabase
+    .from("profiles")
+    .select("id, first_name, last_name, role, is_active")
+    .order("created_at");
+
+  // E-mails : lus côté serveur avec la clé admin, pour ces profils seulement
+  const admin = createAdminClient();
+  const emails = new Map<string, string>();
+  await Promise.all(
+    (members ?? []).map(async (m) => {
+      const { data } = await admin.auth.admin.getUserById(m.id);
+      if (data.user?.email) emails.set(m.id, data.user.email);
+    }),
+  );
+
+  return (
+    <main className="mx-auto max-w-3xl space-y-8 p-8">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Équipe</h1>
+        <Link href="/dashboard" className="text-sm underline">
+          Retour au tableau de bord
+        </Link>
+      </div>
+
+      <ul className="divide-y rounded-md border">
+        {(members ?? []).map((m) => (
+          <li key={m.id} className="flex items-center justify-between p-4">
+            <div>
+              <p className="font-medium">
+                {m.first_name} {m.last_name}{" "}
+                <span className="text-sm text-muted-foreground">
+                  ({m.role === "owner" ? "patron" : "employé"})
+                </span>
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {emails.get(m.id) ?? ""}
+                {!m.is_active && " · désactivé"}
+              </p>
+            </div>
+            {m.id !== caller.user.id && (
+              <div className="flex gap-2">
+                <ToggleActiveButton id={m.id} isActive={m.is_active} />
+                {m.role === "employee" && !m.is_active && (
+                  <DeleteEmployeeButton
+                    id={m.id}
+                    name={`${m.first_name} ${m.last_name}`}
+                  />
+                )}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Ajouter un employé</h2>
+        <AddEmployeeForm />
+      </section>
+    </main>
+  );
+}
+
+===== C:\dev\studyflow\src\app\team\toggle-active-button.tsx =====
+
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+
+export function ToggleActiveButton({
+  id,
+  isActive,
+}: {
+  id: string;
+  isActive: boolean;
+}) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  async function toggle() {
+    if (
+      isActive &&
+      !confirm(
+        "Désactiver ce compte ? La personne ne pourra plus se connecter.",
+      )
+    ) {
+      return;
+    }
+    setLoading(true);
+    const res = await fetch(`/api/team/employees/${id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: !isActive }),
+    });
+    setLoading(false);
+    if (!res.ok) alert((await res.json()).error ?? "Erreur");
+    router.refresh();
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={toggle} disabled={loading}>
+      {isActive ? "Désactiver" : "Réactiver"}
+    </Button>
+  );
+}
+
+===== C:\dev\studyflow\src\app\globals.css =====
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+===== C:\dev\studyflow\src\app\layout.tsx =====
+
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
+      <body className="min-h-full flex flex-col">{children}</body>
+    </html>
+  );
+}
+
+===== C:\dev\studyflow\src\app\page.tsx =====
+
+import { redirect } from "next/navigation";
+
+export default function Home() {
+  redirect("/dashboard");
+}
+
+===== C:\dev\studyflow\src\lib\auth\require-owner.ts =====
+
+import "server-only";
+import { createClient } from "@/lib/supabase/server";
+
+export async function requireOwner() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id, agency_id, role, is_active")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || !profile.is_active || profile.role !== "owner") return null;
+  return { user, profile };
+}
+
+===== C:\dev\studyflow\src\lib\supabase\admin.ts =====
+
+import "server-only";
+import { createClient } from "@supabase/supabase-js";
+
+export function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SECRET_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } },
+  );
+}
+
+===== C:\dev\studyflow\src\lib\supabase\client.ts =====
+
+import { createBrowserClient } from "@supabase/ssr";
+
+export function createClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+  );
+}
+
+===== C:\dev\studyflow\src\lib\supabase\server.ts =====
+
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+export async function createClient() {
+  const cookieStore = await cookies();
+
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options),
+            );
+          } catch {
+            // Appelé depuis un composant serveur : on peut ignorer,
+          }
+        },
+      },
+    },
+  );
+}
+
+===== C:\dev\studyflow\src\lib\audit.ts =====
+
+import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+type Entry = {
+  agencyId: string;
+  actorId: string | null;
+  action: string;
+  targetType?: string;
+  targetId?: string;
+  details?: Record<string, unknown>;
+};
+
+export async function logActivity(admin: SupabaseClient, e: Entry) {
+  const { error } = await admin.from("activity_log").insert({
+    agency_id: e.agencyId,
+    actor_id: e.actorId,
+    action: e.action,
+    target_type: e.targetType ?? null,
+    target_id: e.targetId ?? null,
+    details: e.details ?? {},
+  });
+  // Un échec du journal n'annule pas l'action déjà réussie,
+  // mais il doit se voir dans les logs du serveur.
+  if (error) console.error("[activity_log]", error.message);
+}
+
+===== C:\dev\studyflow\src\lib\utils.ts =====
+
+export { cn } from "cn"
+
+===== C:\dev\studyflow\src\proxy.ts =====
+
+import { NextResponse, type NextRequest } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+
+const PUBLIC_PATHS = ["/login", "/register"];
+
+export async function proxy(request: NextRequest) {
+  let response = NextResponse.next({ request });
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value),
+          );
+          response = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options),
+          );
+        },
+      },
+    },
+  );
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const path = request.nextUrl.pathname;
+  const isPublic = PUBLIC_PATHS.includes(path);
+  const isApi = path.startsWith("/api/");
+
+  function redirectTo(target: string) {
+    const redirect = NextResponse.redirect(new URL(target, request.url));
+    response.cookies.getAll().forEach((cookie) => {
+      redirect.cookies.set(cookie);
+    });
+    return redirect;
+  }
+
+  if (!user && !isPublic && !isApi) {
+    return redirectTo("/login");
+  }
+  if (user && isPublic) {
+    return redirectTo("/dashboard");
+  }
+
+  // Mot de passe temporaire : tout est bloqué sauf la page de changement
+  if (user && !isApi) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("must_change_password")
+      .eq("id", user.id)
+      .single();
+
+    const mustChange = profile?.must_change_password === true;
+    if (mustChange && path !== "/change-password") {
+      return redirectTo("/change-password");
+    }
+    if (!mustChange && path === "/change-password") {
+      return redirectTo("/dashboard");
+    }
+  }
+
+  return response;
+}
+
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth/register).*)"],
+};

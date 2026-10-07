@@ -30,7 +30,10 @@ export function ToggleActiveButton({
       body: JSON.stringify({ isActive: !isActive }),
     });
     setLoading(false);
-    if (!res.ok) alert((await res.json()).error ?? "Erreur");
+    if (!res.ok)
+      alert(
+        (await res.json().catch(() => null))?.error ?? `Erreur ${res.status}`,
+      );
     router.refresh();
   }
 
