@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logActivity } from "@/lib/audit";
 
 const schema = z.object({
   agencyName: z.string().trim().min(1).max(100),
@@ -45,23 +46,35 @@ export async function POST(request: Request) {
   }
 
   // 2. Création de l'agence et du profil patron
-  const { error: rpcError } = await admin.rpc("create_agency_with_owner", {
-    p_user_id: created.user.id,
-    p_agency_name: d.agencyName,
-    p_city: d.city,
-    p_phone: d.phone,
-    p_first_name: d.firstName,
-    p_last_name: d.lastName,
-  });
+  const { data: agencyId, error: rpcError } = await admin.rpc(
+    "create_agency_with_owner",
+    {
+      p_user_id: created.user.id,
+      p_agency_name: d.agencyName,
+      p_city: d.city,
+      p_phone: d.phone,
+      p_first_name: d.firstName,
+      p_last_name: d.lastName,
+    },
+  );
 
   // 3. Si échec : on supprime le compte Auth créé
-  if (rpcError) {
+  if (rpcError || !agencyId) {
     await admin.auth.admin.deleteUser(created.user.id);
     return NextResponse.json(
       { error: "Erreur lors de la création de l'agence" },
       { status: 500 },
     );
   }
+
+  await logActivity(admin, {
+    agencyId: agencyId as string,
+    actorId: created.user.id,
+    action: "agency.created",
+    targetType: "agency",
+    targetId: agencyId as string,
+    details: { agency_name: d.agencyName },
+  });
 
   return NextResponse.json({ ok: true }, { status: 201 });
 }

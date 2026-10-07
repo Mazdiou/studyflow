@@ -3,6 +3,7 @@ import { randomInt } from "node:crypto";
 import { z } from "zod";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logActivity } from "@/lib/audit";
 
 const schema = z.object({
   firstName: z.string().trim().min(1).max(100),
@@ -71,6 +72,15 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+
+  await logActivity(admin, {
+    agencyId: caller.profile.agency_id,
+    actorId: caller.user.id,
+    action: "employee.created",
+    targetType: "profile",
+    targetId: created.user.id,
+    details: { first_name: d.firstName, last_name: d.lastName },
+  });
 
   // Le mot de passe temporaire n'est renvoyé qu'une seule fois, au patron
   return NextResponse.json({ ok: true, temporaryPassword }, { status: 201 });

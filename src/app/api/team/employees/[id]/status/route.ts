@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logActivity } from "@/lib/audit";
 
 const schema = z.object({ isActive: z.boolean() });
 
@@ -48,7 +49,7 @@ export async function PATCH(
   // La cible doit appartenir à l'agence de l'appelant
   const { data: target } = await admin
     .from("profiles")
-    .select("id, is_active")
+    .select("id, is_active, first_name, last_name")
     .eq("id", id)
     .eq("agency_id", caller.profile.agency_id)
     .single();
@@ -87,6 +88,15 @@ export async function PATCH(
       { status: 500 },
     );
   }
+
+  await logActivity(admin, {
+    agencyId: caller.profile.agency_id,
+    actorId: caller.user.id,
+    action: isActive ? "employee.reactivated" : "employee.deactivated",
+    targetType: "profile",
+    targetId: id,
+    details: { first_name: target.first_name, last_name: target.last_name },
+  });
 
   return NextResponse.json({ ok: true });
 }
