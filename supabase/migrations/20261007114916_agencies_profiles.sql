@@ -1,6 +1,11 @@
 -- Migration : agencies_profiles
 -- Tables agencies et profiles, fonctions d'aide, droits et RLS
 
+-- Droits par défaut : rien n'est exposé automatiquement
+alter default privileges in schema public revoke all on tables from anon, authenticated;
+alter default privileges in schema public revoke all on sequences from anon, authenticated;
+alter default privileges in schema public revoke execute on functions from anon, authenticated;
+
 -- Tables
 create table public.agencies (
   id uuid primary key default gen_random_uuid(),
@@ -26,7 +31,11 @@ create index profiles_agency_id_idx on public.profiles (agency_id);
 alter table public.agencies enable row level security;
 alter table public.profiles enable row level security;
 
--- Fonctions d'aide (évite la récursion RLS)
+-- Retirer tout droit éventuellement accordé automatiquement
+revoke all on public.agencies from anon, authenticated;
+revoke all on public.profiles from anon, authenticated;
+
+-- Fonctions d'aide (security definer : évite la récursion RLS)
 create or replace function public.current_agency_id()
 returns uuid
 language sql
@@ -53,6 +62,7 @@ as $$
 $$;
 
 -- Création d'une agence et de son premier patron (une seule transaction).
+-- Appelée uniquement par la route serveur d'inscription (clé secrète).
 create or replace function public.create_agency_with_owner(
   p_user_id uuid,
   p_agency_name text,
@@ -92,13 +102,14 @@ grant execute on function public.create_agency_with_owner(uuid, text, text, text
   to service_role;
 
 -- Droits d'accès aux tables (exposition manuelle de l'API)
+-- Utilisateurs connectés : lecture, et modification de colonnes précises
 grant select on public.agencies to authenticated;
 grant update (name, city, phone) on public.agencies to authenticated;
 
 grant select on public.profiles to authenticated;
 grant update (first_name, last_name, is_active) on public.profiles to authenticated;
-
 -- Aucun insert/delete côté client, role et agency_id non modifiables.
+
 -- Routes serveur (clé secrète) : accès complet
 grant select, insert, update, delete on public.agencies to service_role;
 grant select, insert, update, delete on public.profiles to service_role;
