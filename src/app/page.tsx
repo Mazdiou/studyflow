@@ -1,15 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
-export default async function Home() {
-  const supabase = await createClient();
-  const { error } = await supabase.auth.getSession();
-
-  return (
-    <main className="p-8">
-      <h1 className="text-2xl font-bold">StudyFlow</h1>
-      <p className="mt-4">
-        Connexion Supabase : {error ? `erreur (${error.message})` : "OK"}
-      </p>
-    </main>
-  );
+export default function Home() {
+  redirect("/dashboard");
 }
