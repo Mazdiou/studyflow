@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { DeleteEmployeeButton } from "./delete-employee-button";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOwner } from "@/lib/auth/require-owner";
@@ -52,7 +53,15 @@ export default async function TeamPage() {
               </p>
             </div>
             {m.id !== caller.user.id && (
-              <ToggleActiveButton id={m.id} isActive={m.is_active} />
+              <div className="flex gap-2">
+                <ToggleActiveButton id={m.id} isActive={m.is_active} />
+                {m.role === "employee" && !m.is_active && (
+                  <DeleteEmployeeButton
+                    id={m.id}
+                    name={`${m.first_name} ${m.last_name}`}
+                  />
+                )}
+              </div>
             )}
           </li>
         ))}
