@@ -40,7 +40,7 @@ export async function POST(request: Request) {
 
   if (authError || !created.user) {
     return NextResponse.json(
-      { error: "Impossible de créer le compte (e-mail déjà utilisé ?)" },
+      { error: "Impossible de créer le compte (e-mail déjà utilisé)" },
       { status: 400 },
     );
   }
