@@ -7,6 +7,7 @@ type Entry = {
   action: string;
   targetType?: string;
   targetId?: string;
+  caseId?: string;
   details?: Record<string, unknown>;
 };
 
@@ -17,6 +18,7 @@ export async function logActivity(admin: SupabaseClient, e: Entry) {
     action: e.action,
     target_type: e.targetType ?? null,
     target_id: e.targetId ?? null,
+    case_id: e.caseId ?? null,
     details: e.details ?? {},
   });
   // Un échec du journal n'annule pas l'action déjà réussie,
