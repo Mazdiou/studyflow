@@ -35,7 +35,22 @@ function FieldError({ message }: { message?: string }) {
   return <p className="text-sm text-red-600">{message}</p>;
 }
 
-export function NewCaseForm() {
+type Member = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  role: string;
+};
+
+export function NewCaseForm({
+  members,
+  currentUserId,
+  isOwner,
+}: {
+  members: Member[];
+  currentUserId: string;
+  isOwner: boolean;
+}) {
   const [pastelAccount, setPastelAccount] = useState<"to_create" | "existing">(
     "to_create",
   );
@@ -64,6 +79,7 @@ export function NewCaseForm() {
       mainTrack: String(form.get("mainTrack") ?? ""),
       schools: form.get("schools") === "on",
       scope: String(form.get("scope") ?? ""),
+      assignedTo: isOwner ? String(form.get("assignedTo") ?? "") : "",
       pastelAccount,
       pastelEmail: isExisting ? String(form.get("pastelEmail") ?? "") : "",
       pastelPassword: isExisting
@@ -161,7 +177,7 @@ export function NewCaseForm() {
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1">
               <Label htmlFor="educationLevel">
-                Niveau d&apos;études actuel
+                Niveau d&apos;études atteint ou en cours
               </Label>
               <select
                 id="educationLevel"
@@ -226,6 +242,29 @@ export function NewCaseForm() {
               Choisissez au moins une procédure (DAP ou hors-DAP) ou cochez «
               Écoles ».
             </p>
+            {isOwner ? (
+              <div className="space-y-1 sm:col-span-2">
+                <Label htmlFor="assignedTo">Responsable du dossier</Label>
+                <select
+                  id="assignedTo"
+                  name="assignedTo"
+                  defaultValue={currentUserId}
+                  className={selectClass}
+                >
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.first_name} {m.last_name}
+                      {m.id === currentUserId ? " (moi)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <FieldError message={fieldErrors.assignedTo} />
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground sm:col-span-2">
+                Ce dossier vous sera affecté automatiquement.
+              </p>
+            )}
           </CardContent>
         </Card>
 

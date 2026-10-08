@@ -21,6 +21,7 @@ select public.create_case(
   'bbbbbbbb-0000-0000-0000-000000000001'::uuid,
   (select agency_a from ctx),
   '11111111-1111-1111-1111-111111111111'::uuid,
+  null::uuid,
   'Karim', 'Test', '2004-05-01'::date, '0555111111', null,
   'l3', 'non_dap', false, 'both', 'to_create', null,
   array[]::text[], array[]::text[], null, 1::smallint);

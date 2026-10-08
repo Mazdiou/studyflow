@@ -34,6 +34,7 @@ export const createCaseSchema = z
     ),
     schools: z.boolean(),
     scope: z.enum(["application", "visa", "both"]),
+    assignedTo: z.preprocess(emptyToUndefined, z.string().uuid().optional()),
     pastelAccount: z.enum(["to_create", "existing"]),
     pastelEmail: optionalEmail,
     pastelPassword: z.preprocess(

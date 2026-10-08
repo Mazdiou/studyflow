@@ -39,6 +39,13 @@ async function createCase(request: Request) {
   const caseId = randomUUID();
   const isExisting = d.pastelAccount === "existing";
 
+  // Responsable : le patron choisit (lui-même par défaut), l'employé est
+  // toujours responsable de ses propres dossiers, quoi que dise la requête.
+  const isOwner = caller.profile.role === "owner";
+  const assignedTo = isOwner
+    ? (d.assignedTo ?? caller.user.id)
+    : caller.user.id;
+
   // Le mot de passe est chiffré ici, lié à ce dossier précis.
   // Pour un compte "à créer", rien n'est enregistré.
   let passwordEncrypted: string | null = null;
@@ -54,6 +61,7 @@ async function createCase(request: Request) {
     p_case_id: caseId,
     p_agency_id: agencyId,
     p_created_by: caller.user.id,
+    p_assigned_to: assignedTo,
     p_first_name: d.firstName,
     p_last_name: d.lastName,
     p_birth_date: d.birthDate,
@@ -73,6 +81,21 @@ async function createCase(request: Request) {
 
   if (error) {
     console.error("[cases POST] create_case", error.code, error.message);
+    if (error.code === "22023") {
+      return NextResponse.json(
+        {
+          error: "Données invalides",
+          fields: [
+            {
+              path: "assignedTo",
+              message:
+                "Responsable invalide (compte inactif ou d'une autre agence)",
+            },
+          ],
+        },
+        { status: 400 },
+      );
+    }
     if (error.code === "P0001") {
       return NextResponse.json(
         { error: "Aucune campagne en cours : contactez le support" },
@@ -93,7 +116,11 @@ async function createCase(request: Request) {
     targetType: "case",
     targetId: caseId,
     caseId,
-    details: { first_name: d.firstName, last_name: d.lastName },
+    details: {
+      first_name: d.firstName,
+      last_name: d.lastName,
+      assigned_to: assignedTo,
+    },
   });
 
   return NextResponse.json({ ok: true, id: caseId }, { status: 201 });
