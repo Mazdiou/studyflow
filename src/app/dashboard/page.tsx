@@ -21,6 +21,11 @@ export default async function DashboardPage() {
         Bonjour {profile?.first_name} {profile?.last_name} ({profile?.role})
       </p>
       <LogoutButton />
+      <p>
+        <Link href="/cases/new" className="underline">
+          Nouveau dossier
+        </Link>
+      </p>
       {profile?.role === "owner" && (
         <p>
           <Link href="/team" className="underline">
