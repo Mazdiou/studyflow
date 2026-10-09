@@ -11,7 +11,14 @@ type Entry = {
   details?: Record<string, unknown>;
 };
 
-export async function logActivity(admin: SupabaseClient, e: Entry) {
+// Renvoie true si la ligne de journal est bien enregistrée.
+// Les appelants existants peuvent ignorer le résultat : un échec du journal
+// n'annule pas l'action déjà réussie, mais il se voit dans les logs du serveur.
+// Une action sensible (afficher un mot de passe) vérifie le résultat AVANT d'agir.
+export async function logActivity(
+  admin: SupabaseClient,
+  e: Entry,
+): Promise<boolean> {
   const { error } = await admin.from("activity_log").insert({
     agency_id: e.agencyId,
     actor_id: e.actorId,
@@ -21,7 +28,9 @@ export async function logActivity(admin: SupabaseClient, e: Entry) {
     case_id: e.caseId ?? null,
     details: e.details ?? {},
   });
-  // Un échec du journal n'annule pas l'action déjà réussie,
-  // mais il doit se voir dans les logs du serveur.
-  if (error) console.error("[activity_log]", error.message);
+  if (error) {
+    console.error("[activity_log]", error.message);
+    return false;
+  }
+  return true;
 }

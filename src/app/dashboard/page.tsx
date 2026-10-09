@@ -26,6 +26,11 @@ export default async function DashboardPage() {
           Nouveau dossier
         </Link>
       </p>
+      <p>
+        <Link href="/cases" className="underline">
+          Dossiers
+        </Link>
+      </p>
       {profile?.role === "owner" && (
         <p>
           <Link href="/team" className="underline">
