@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LEVEL_LABELS, STATUS_LABELS } from "@/lib/case-labels";
 
 const selectClass =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
@@ -57,6 +58,27 @@ export type CaseInitial = {
   assignedTo: string | null;
   diplomas: string[];
   languageTests: string[];
+  pastelEmail?: string;
+};
+
+export type ImportMatch = {
+  id: string;
+  campaignLabel: string;
+  isCurrent: boolean;
+  status: string;
+  firstName: string;
+  lastName: string;
+  birthDate: string;
+  phone: string;
+  email: string | null;
+  educationLevel: string;
+  mainTrack: string | null;
+  schools: boolean;
+  scope: string;
+  languageTests: string[];
+  diplomas: string[];
+  pastelAccount: "to_create" | "existing";
+  pastelEmail: string | null;
 };
 
 export function CaseForm({
@@ -84,6 +106,37 @@ export function CaseForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [createdName, setCreatedName] = useState<string | null>(null);
+  const [imported, setImported] = useState<CaseInitial | null>(null);
+  const [importedFrom, setImportedFrom] = useState<string | null>(null);
+  const [formKey, setFormKey] = useState(0);
+  // Valeurs de départ : celles importées, sinon celles du dossier (modification)
+  const init = imported ?? initial;
+
+  function handleImport(m: ImportMatch) {
+    const existing = m.pastelAccount === "existing";
+    setImported({
+      firstName: m.firstName,
+      lastName: m.lastName,
+      birthDate: m.birthDate,
+      phone: m.phone,
+      email: m.email ?? "",
+      educationLevel: m.educationLevel,
+      mainTrack: m.mainTrack ?? "",
+      schools: m.schools,
+      scope: m.scope,
+      assignedTo: null,
+      diplomas: m.diplomas,
+      languageTests: m.languageTests,
+      // Compte existant : seul l'e-mail est repris, le mot de passe est à ressaisir
+      pastelEmail: existing ? (m.pastelEmail ?? "") : "",
+    });
+    setPastelAccount(existing ? "existing" : "to_create");
+    setImportedFrom(m.campaignLabel);
+    setError(null);
+    setFieldErrors({});
+    setCreatedName(null);
+    setFormKey((k) => k + 1);
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -91,8 +144,7 @@ export function CaseForm({
     setFieldErrors({});
     setCreatedName(null);
 
-    const formEl = e.currentTarget;
-    const form = new FormData(formEl);
+    const form = new FormData(e.currentTarget);
     const isExisting = pastelAccount === "existing";
 
     const common = {
@@ -152,12 +204,14 @@ export function CaseForm({
     }
 
     setCreatedName(`${common.firstName} ${common.lastName}`);
-    formEl.reset();
+    setImported(null);
+    setImportedFrom(null);
     setPastelAccount("to_create");
+    setFormKey((k) => k + 1);
     router.refresh();
   }
 
-  const assignedDefault = isEdit ? (initial?.assignedTo ?? "") : currentUserId;
+  const assignedDefault = isEdit ? (init?.assignedTo ?? "") : currentUserId;
 
   return (
     <div className="space-y-4">
@@ -171,7 +225,22 @@ export function CaseForm({
         </div>
       )}
 
-      <form onSubmit={onSubmit} className="space-y-6">
+      {!isEdit && <ImportPanel onImport={handleImport} />}
+
+      {importedFrom && (
+        <div className="rounded-md border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
+          <p className="font-medium">
+            Données importées de la campagne {importedFrom}.
+          </p>
+          <p className="mt-1">
+            Vérifiez-les et modifiez ce qui a changé (le niveau d&apos;études,
+            par exemple). L&apos;ancien dossier n&apos;est pas modifié :
+            l&apos;enregistrement crée une nouvelle candidature.
+          </p>
+        </div>
+      )}
+
+      <form key={formKey} onSubmit={onSubmit} className="space-y-6">
         <Card>
           <CardHeader>
             <CardTitle>Candidat</CardTitle>
@@ -182,7 +251,7 @@ export function CaseForm({
               <Input
                 id="firstName"
                 name="firstName"
-                defaultValue={initial?.firstName}
+                defaultValue={init?.firstName}
                 required
               />
               <FieldError message={fieldErrors.firstName} />
@@ -192,7 +261,7 @@ export function CaseForm({
               <Input
                 id="lastName"
                 name="lastName"
-                defaultValue={initial?.lastName}
+                defaultValue={init?.lastName}
                 required
               />
               <FieldError message={fieldErrors.lastName} />
@@ -203,7 +272,7 @@ export function CaseForm({
                 id="birthDate"
                 name="birthDate"
                 type="date"
-                defaultValue={initial?.birthDate}
+                defaultValue={init?.birthDate}
                 max={new Date().toISOString().slice(0, 10)}
                 required
               />
@@ -215,7 +284,7 @@ export function CaseForm({
                 id="phone"
                 name="phone"
                 type="tel"
-                defaultValue={initial?.phone}
+                defaultValue={init?.phone}
                 required
               />
               <FieldError message={fieldErrors.phone} />
@@ -226,7 +295,7 @@ export function CaseForm({
                 id="email"
                 name="email"
                 type="email"
-                defaultValue={initial?.email}
+                defaultValue={init?.email}
               />
               <FieldError message={fieldErrors.email} />
             </div>
@@ -246,7 +315,7 @@ export function CaseForm({
                 id="educationLevel"
                 name="educationLevel"
                 required
-                defaultValue={initial?.educationLevel ?? ""}
+                defaultValue={init?.educationLevel ?? ""}
                 className={selectClass}
               >
                 <option value="" disabled>
@@ -266,7 +335,7 @@ export function CaseForm({
                 id="scope"
                 name="scope"
                 required
-                defaultValue={initial?.scope ?? ""}
+                defaultValue={init?.scope ?? ""}
                 className={selectClass}
               >
                 <option value="" disabled>
@@ -283,7 +352,7 @@ export function CaseForm({
               <select
                 id="mainTrack"
                 name="mainTrack"
-                defaultValue={initial?.mainTrack ?? ""}
+                defaultValue={init?.mainTrack ?? ""}
                 className={selectClass}
               >
                 <option value="">Aucune</option>
@@ -297,7 +366,7 @@ export function CaseForm({
                 id="schools"
                 name="schools"
                 type="checkbox"
-                defaultChecked={initial?.schools ?? false}
+                defaultChecked={init?.schools ?? false}
                 className="size-4"
               />
               <Label htmlFor="schools">Écoles</Label>
@@ -315,7 +384,7 @@ export function CaseForm({
                   defaultValue={assignedDefault}
                   className={selectClass}
                 >
-                  {isEdit && !initial?.assignedTo && (
+                  {isEdit && !init?.assignedTo && (
                     <option value="">Aucun (non attribué)</option>
                   )}
                   {members.map((m) => (
@@ -352,7 +421,7 @@ export function CaseForm({
                     name="diplomas"
                     type="checkbox"
                     value={value}
-                    defaultChecked={initial?.diplomas.includes(value) ?? false}
+                    defaultChecked={init?.diplomas.includes(value) ?? false}
                     className="size-4"
                   />
                   <Label htmlFor={`diploma-${value}`}>{label}</Label>
@@ -373,7 +442,7 @@ export function CaseForm({
                     type="checkbox"
                     value={value}
                     defaultChecked={
-                      initial?.languageTests.includes(value) ?? false
+                      init?.languageTests.includes(value) ?? false
                     }
                     className="size-4"
                   />
@@ -419,6 +488,7 @@ export function CaseForm({
                       name="pastelEmail"
                       type="email"
                       autoComplete="off"
+                      defaultValue={init?.pastelEmail}
                       required
                     />
                     <FieldError message={fieldErrors.pastelEmail} />
@@ -439,6 +509,9 @@ export function CaseForm({
                   <p className="text-sm text-muted-foreground sm:col-span-2">
                     Le mot de passe est chiffré avant d&apos;être enregistré et
                     n&apos;apparaît jamais dans les listes.
+                    {importedFrom
+                      ? " Le mot de passe de l'ancien compte n'est jamais repris : saisissez-le à nouveau."
+                      : ""}
                   </p>
                 </div>
               ) : (
@@ -474,5 +547,156 @@ export function CaseForm({
         </div>
       </form>
     </div>
+  );
+}
+
+function ImportPanel({ onImport }: { onImport: (m: ImportMatch) => void }) {
+  const [open, setOpen] = useState(false);
+  const [lastName, setLastName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [birthDate, setBirthDate] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [matches, setMatches] = useState<ImportMatch[] | null>(null);
+
+  async function search() {
+    setError(null);
+    setMatches(null);
+    setLoading(true);
+    const res = await fetch("/api/cases/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lastName, firstName, birthDate }),
+    });
+    const data = await res.json().catch(() => null);
+    setLoading(false);
+    if (!res.ok || !Array.isArray(data?.matches)) {
+      setError(data?.error ?? `Erreur ${res.status}`);
+      return;
+    }
+    setMatches(data.matches as ImportMatch[]);
+  }
+
+  if (!open) {
+    return (
+      <Button type="button" variant="outline" onClick={() => setOpen(true)}>
+        Importer depuis une ancienne campagne
+      </Button>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Importer depuis une ancienne campagne</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Retrouvez le candidat pour reprendre ses informations. Un nouveau
+          dossier sera créé dans la campagne en cours ; l&apos;ancien reste
+          inchangé.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="space-y-1">
+            <Label htmlFor="importLastName">Nom</Label>
+            <Input
+              id="importLastName"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="importFirstName">Prénom</Label>
+            <Input
+              id="importFirstName"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="importBirthDate">Date de naissance</Label>
+            <Input
+              id="importBirthDate"
+              type="date"
+              value={birthDate}
+              onChange={(e) => setBirthDate(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            onClick={search}
+            disabled={
+              loading || !lastName.trim() || !firstName.trim() || !birthDate
+            }
+          >
+            {loading ? "Recherche..." : "Rechercher"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setOpen(false);
+              setMatches(null);
+              setError(null);
+            }}
+          >
+            Fermer
+          </Button>
+        </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        {matches && matches.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Aucun dossier trouvé pour ce nom, ce prénom et cette date de
+            naissance dans votre agence.
+          </p>
+        )}
+
+        {matches && matches.length > 0 && (
+          <ul className="divide-y rounded-md border">
+            {matches.map((m) => (
+              <li
+                key={m.id}
+                className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm"
+              >
+                <span>
+                  {m.lastName.toLocaleUpperCase("fr")} {m.firstName} · Campagne{" "}
+                  {m.campaignLabel} ·{" "}
+                  {LEVEL_LABELS[m.educationLevel] ?? m.educationLevel} ·{" "}
+                  {STATUS_LABELS[m.status] ?? m.status}
+                </span>
+                {m.isCurrent ? (
+                  <span className="flex items-center gap-2">
+                    <span className="text-amber-700">
+                      Déjà présent dans la campagne en cours
+                    </span>
+                    <Link href={`/cases/${m.id}`} className="underline">
+                      Ouvrir
+                    </Link>
+                  </span>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      onImport(m);
+                      setOpen(false);
+                      setMatches(null);
+                    }}
+                  >
+                    Importer
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
