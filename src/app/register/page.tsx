@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import Link from "next/link";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -23,8 +23,8 @@ const fields = [
 ] as const;
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -48,23 +48,15 @@ export default function RegisterPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+
+    if (res.ok) {
+      router.replace("/login");
+      return;
+    }
+
     setLoading(false);
-
-    if (res.ok) setDone(true);
-    else
-      setError(
-        (await res.json().catch(() => null))?.error ?? `Erreur ${res.status}`,
-      );
-  }
-
-  if (done) {
-    return (
-      <main className="space-y-2 p-8">
-        <p>Compte créé.</p>
-        <Link href="/login" className="underline">
-          Se connecter
-        </Link>
-      </main>
+    setError(
+      (await res.json().catch(() => null))?.error ?? `Erreur ${res.status}`,
     );
   }
 

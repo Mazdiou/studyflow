@@ -105,7 +105,6 @@ export function CaseForm({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
-  const [createdName, setCreatedName] = useState<string | null>(null);
   const [imported, setImported] = useState<CaseInitial | null>(null);
   const [importedFrom, setImportedFrom] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
@@ -134,7 +133,6 @@ export function CaseForm({
     setImportedFrom(m.campaignLabel);
     setError(null);
     setFieldErrors({});
-    setCreatedName(null);
     setFormKey((k) => k + 1);
   }
 
@@ -142,7 +140,6 @@ export function CaseForm({
     e.preventDefault();
     setError(null);
     setFieldErrors({});
-    setCreatedName(null);
 
     const form = new FormData(e.currentTarget);
     const isExisting = pastelAccount === "existing";
@@ -203,11 +200,8 @@ export function CaseForm({
       return;
     }
 
-    setCreatedName(`${common.firstName} ${common.lastName}`);
-    setImported(null);
-    setImportedFrom(null);
-    setPastelAccount("to_create");
-    setFormKey((k) => k + 1);
+    // Création réussie : direction la fiche du dossier créé
+    router.push(`/cases/${data.id}`);
     router.refresh();
   }
 
@@ -215,16 +209,6 @@ export function CaseForm({
 
   return (
     <div className="space-y-4">
-      {createdName && (
-        <div className="rounded-md border border-green-400 bg-green-50 p-4 text-sm text-green-900">
-          <p className="font-medium">Dossier créé pour {createdName}.</p>
-          <p className="mt-1">
-            Vous pouvez en saisir un autre ci-dessous. Le dossier apparaît dans
-            l&apos;arbre à gauche.
-          </p>
-        </div>
-      )}
-
       {!isEdit && <ImportPanel onImport={handleImport} />}
 
       {importedFrom && (
