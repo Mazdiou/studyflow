@@ -42,3 +42,9 @@ export const DIPLOMA_LABELS: Record<string, string> = {
 export function displayName(firstName: string, lastName: string) {
   return `${lastName.toLocaleUpperCase("fr")} ${firstName}`;
 }
+
+export function procedureLabel(track: string | null, schools: boolean) {
+  const t = track ? (TRACK_LABELS[track] ?? track) : null;
+  if (t && schools) return `${t} et écoles`;
+  return t ?? (schools ? "Écoles" : "—");
+}

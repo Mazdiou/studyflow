@@ -1,9 +1,8 @@
 import { notFound, redirect } from "next/navigation";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireMember } from "@/lib/auth/require-member";
-import { displayName } from "@/lib/case-labels";
 import { CaseForm, type Member } from "../../case-form";
+import { getCase } from "../get-case";
 
 export default async function EditCasePage({
   params,
@@ -14,16 +13,9 @@ export default async function EditCasePage({
   if (!caller) redirect("/login");
 
   const { id } = await params;
-  if (!z.string().uuid().safeParse(id).success) notFound();
-
-  // Lecture via le RLS : un dossier d'une autre agence n'est pas trouvé.
-  const supabase = await createClient();
-  const { data: c } = await supabase
-    .from("cases")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (!c) notFound();
+  const data = await getCase(id);
+  if (!data) notFound();
+  const { c } = data;
 
   const isOwner = caller.profile.role === "owner";
 
@@ -31,25 +23,21 @@ export default async function EditCasePage({
   // toujours dans la liste, même s'il est devenu inactif.
   let members: Member[] = [];
   if (isOwner) {
+    const supabase = await createClient();
     const filter = c.assigned_to
       ? `is_active.eq.true,id.eq.${c.assigned_to}`
       : "is_active.eq.true";
-    const { data } = await supabase
+    const { data: list } = await supabase
       .from("profiles")
       .select("id, first_name, last_name, role, is_active")
       .or(filter)
       .order("first_name");
-    members = (data ?? []) as Member[];
+    members = (list ?? []) as Member[];
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold">Modifier le dossier</h1>
-        <p className="text-sm text-muted-foreground">
-          {displayName(c.first_name, c.last_name)}
-        </p>
-      </div>
+    <div className="max-w-2xl space-y-6">
+      <h2 className="text-lg font-semibold">Modifier le dossier</h2>
       <CaseForm
         key={c.id}
         mode="edit"

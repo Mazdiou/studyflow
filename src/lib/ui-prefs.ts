@@ -1,0 +1,92 @@
+import { useSyncExternalStore } from "react";
+
+// Mémoire de l'interface (largeur, dossiers ouverts, réglages, filtres).
+// Stockée dans localStorage, lue côté client seulement : le rendu serveur et
+// l'hydratation utilisent les valeurs par défaut, puis React bascule sur les
+// valeurs mémorisées sans écart d'hydratation. Aucune donnée sensible ici.
+
+export type UiPrefs = {
+  width: number;
+  collapsed: boolean;
+  open: Record<string, boolean>;
+  showLevel: boolean;
+  showClosed: boolean;
+  sortBy: "name" | "level";
+  level: string;
+  responsible: string;
+  mine: boolean;
+};
+
+export const DEFAULT_PREFS: UiPrefs = {
+  width: 288,
+  collapsed: false,
+  open: {},
+  showLevel: false,
+  showClosed: false,
+  sortBy: "name",
+  level: "",
+  responsible: "",
+  mine: false,
+};
+
+const KEY = "sf:ui";
+const listeners = new Set<() => void>();
+let cache: UiPrefs = DEFAULT_PREFS;
+let loaded = false;
+
+function sanitize(raw: unknown): UiPrefs {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Partial<UiPrefs>;
+  const d = DEFAULT_PREFS;
+  return {
+    width:
+      typeof r.width === "number" ? Math.min(520, Math.max(220, r.width)) : d.width,
+    collapsed: r.collapsed === true,
+    open: r.open && typeof r.open === "object" ? r.open : d.open,
+    showLevel: r.showLevel === true,
+    showClosed: r.showClosed === true,
+    sortBy: r.sortBy === "level" ? "level" : "name",
+    level: typeof r.level === "string" ? r.level : "",
+    responsible: typeof r.responsible === "string" ? r.responsible : "",
+    mine: r.mine === true,
+  };
+}
+
+function read(): UiPrefs {
+  if (typeof window === "undefined") return DEFAULT_PREFS;
+  if (!loaded) {
+    loaded = true;
+    try {
+      const raw = window.localStorage.getItem(KEY);
+      if (raw) cache = sanitize(JSON.parse(raw));
+    } catch {
+      // stockage indisponible : on garde les valeurs par défaut
+    }
+  }
+  return cache;
+}
+
+export function setPrefs(
+  patch: Partial<UiPrefs> | ((p: UiPrefs) => Partial<UiPrefs>),
+) {
+  const current = read();
+  cache = sanitize({
+    ...current,
+    ...(typeof patch === "function" ? patch(current) : patch),
+  });
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(cache));
+  } catch {
+    // ignoré
+  }
+  listeners.forEach((l) => l());
+}
+
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+
+export function useUiPrefs() {
+  const prefs = useSyncExternalStore(subscribe, read, () => DEFAULT_PREFS);
+  return [prefs, setPrefs] as const;
+}

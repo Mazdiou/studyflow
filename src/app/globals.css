@@ -128,3 +128,9 @@
     @apply font-sans;
   }
 }
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
