@@ -13,6 +13,11 @@ const ACTION_LABELS: Record<string, string> = {
   "case.reopened": "a rouvert le dossier",
   "pastel.credentials_updated": "a modifié le compte Pastel",
   "pastel.password_viewed": "a affiché le mot de passe Pastel",
+  "document.added": "a ajouté un document",
+  "document.renamed": "a renommé un document",
+  "document.deleted": "a supprimé un document",
+  "document.locked": "a verrouillé un document",
+  "document.unlocked": "a déverrouillé un document",
 };
 
 const dateFormat = new Intl.DateTimeFormat("fr-FR", {
