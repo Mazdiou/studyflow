@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -20,6 +20,10 @@ import { LEVEL_LABELS, LEVEL_ORDER, displayName } from "@/lib/case-labels";
 import { normalizeName } from "@/lib/names";
 import { cn } from "@/lib/utils";
 import { useUiPrefs } from "@/lib/ui-prefs";
+import { createClient } from "@/lib/supabase/client";
+import { fetchCampaignCases, type TreeCase } from "@/lib/case-tree-data";
+
+export type { TreeCase };
 
 export type TreeCampaign = { id: string; label: string; is_current: boolean };
 
@@ -28,19 +32,6 @@ export type TreeMember = {
   first_name: string;
   last_name: string;
   is_active: boolean;
-};
-
-export type TreeCase = {
-  id: string;
-  campaign_id: string;
-  first_name: string;
-  last_name: string;
-  phone: string;
-  education_level: string;
-  main_track: string | null;
-  schools: boolean;
-  status: string;
-  assigned_to: string | null;
 };
 
 // Un candidat peut apparaître dans deux dossiers (ex. DAP et École).
@@ -84,12 +75,15 @@ const selectClass =
 
 export function CaseTree({
   campaigns,
-  cases,
+  cases: initialCases,
+  loadedCampaignIds,
   members,
   currentUserId,
 }: {
   campaigns: TreeCampaign[];
+  // Dossiers des campagnes déjà chargées par le serveur (la campagne en cours)
   cases: TreeCase[];
+  loadedCampaignIds: string[];
   members: TreeMember[];
   currentUserId: string;
 }) {
@@ -115,7 +109,58 @@ export function CaseTree({
   }, [setPrefs]);
 
   const width = dragWidth ?? prefs.width;
+
+  // --- Autres campagnes : chargées à l'ouverture (ou pendant une recherche) ---
+  const [extra, setExtra] = useState<Record<string, TreeCase[]>>({});
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(
+    null,
+  );
+  const inflight = useRef(new Set<string>());
+  const loaded = useRef(new Set<string>());
+  const lookedUp = useRef(new Set<string>());
+
+  const load = useCallback(async (id: string) => {
+    if (inflight.current.has(id)) return;
+    inflight.current.add(id);
+    try {
+      const rows = await fetchCampaignCases(createClient(), id);
+      loaded.current.add(id);
+      setExtra((e) => ({ ...e, [id]: rows }));
+      setErrors((e) => (e[id] ? { ...e, [id]: false } : e));
+    } catch {
+      setErrors((e) => ({ ...e, [id]: true }));
+    } finally {
+      inflight.current.delete(id);
+    }
+  }, []);
+
+  const cases = useMemo(
+    () => [...initialCases, ...Object.values(extra).flat()],
+    [initialCases, extra],
+  );
   const selectedCase = cases.find((c) => c.id === selectedId);
+
+  // Après un router.refresh(), les campagnes déjà chargées sont relues
+  useEffect(() => {
+    for (const id of loaded.current) void load(id);
+  }, [initialCases, load]);
+
+  // Dossier ouvert dont la campagne n'est pas chargée (lien direct) : on
+  // cherche sa campagne pour la charger et l'ouvrir
+  useEffect(() => {
+    if (!selectedId || cases.some((c) => c.id === selectedId)) return;
+    if (lookedUp.current.has(selectedId)) return;
+    lookedUp.current.add(selectedId);
+    void (async () => {
+      const { data } = await createClient()
+        .from("cases")
+        .select("campaign_id")
+        .eq("id", selectedId)
+        .maybeSingle();
+      if (data?.campaign_id) setSelectedCampaignId(data.campaign_id as string);
+    })();
+  }, [selectedId, cases]);
 
   // --- Recherche et filtres (côté client, sur les dossiers déjà chargés) ---
   const q = normalizeName(query);
@@ -123,6 +168,33 @@ export function CaseTree({
   const searching = q !== "";
   const filtersActive = Boolean(prefs.level || prefs.responsible || prefs.mine);
   const anyActive = searching || filtersActive;
+
+  function isCampOpen(camp: TreeCampaign) {
+    if (searching) return true;
+    return (
+      prefs.open[camp.id] ??
+      (camp.is_current ||
+        selectedCase?.campaign_id === camp.id ||
+        selectedCampaignId === camp.id)
+    );
+  }
+  const serverLoaded = new Set(loadedCampaignIds);
+  const isLoaded = (id: string) => serverLoaded.has(id) || id in extra;
+  const wantedKey = campaigns
+    .filter((c) => !serverLoaded.has(c.id) && isCampOpen(c))
+    .map((c) => c.id)
+    .join(",");
+  const waiting = campaigns.some((c) => !isLoaded(c.id) && !errors[c.id]);
+  const failed = campaigns.some((c) => errors[c.id]);
+
+  useEffect(() => {
+    const ids = wantedKey
+      .split(",")
+      .filter((id) => id && !(id in extra) && !errors[id]);
+    if (ids.length === 0) return;
+    const t = setTimeout(() => ids.forEach((id) => void load(id)), 0);
+    return () => clearTimeout(t);
+  }, [wantedKey, extra, errors, load]);
 
   function matches(c: TreeCase) {
     if (searching) {
@@ -311,6 +383,14 @@ export function CaseTree({
           </div>
         </div>
 
+        {searching && (waiting || failed) && (
+          <p className="px-3 pt-2 text-xs text-muted-foreground" role="status">
+            {waiting
+              ? "Recherche dans les autres campagnes..."
+              : "Certaines campagnes n'ont pas pu être chargées : résultats incomplets."}
+          </p>
+        )}
+
         {/* Filtres */}
         <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2 pb-2">
           <button
@@ -395,10 +475,7 @@ export function CaseTree({
           {campaigns.map((camp) => {
             const campCases = found.filter((c) => c.campaign_id === camp.id);
             if (searching && campCases.length === 0) return null;
-            const campOpen = searching
-              ? true
-              : (prefs.open[camp.id] ??
-                (camp.is_current || selectedCase?.campaign_id === camp.id));
+            const campOpen = isCampOpen(camp);
 
             return (
               <div key={camp.id}>
@@ -420,7 +497,26 @@ export function CaseTree({
                   <span className="truncate">Campagne {camp.label}</span>
                 </button>
 
+                {campOpen && !isLoaded(camp.id) && (
+                  <div className="py-1 pr-3 pl-9 text-sm text-muted-foreground">
+                    {errors[camp.id] ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setErrors((e) => ({ ...e, [camp.id]: false }))
+                        }
+                        className="underline-offset-2 hover:underline"
+                      >
+                        Chargement impossible. Réessayer
+                      </button>
+                    ) : (
+                      "Chargement..."
+                    )}
+                  </div>
+                )}
+
                 {campOpen &&
+                  isLoaded(camp.id) &&
                   FOLDERS.map((folder) => {
                     const key = `${camp.id}:${folder.key}`;
                     const inFolder = campCases.filter(folder.match);
