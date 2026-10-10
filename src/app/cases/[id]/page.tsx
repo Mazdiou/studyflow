@@ -6,6 +6,7 @@ import {
   SCOPE_LABELS,
   procedureLabel,
 } from "@/lib/case-labels";
+import { KeyRow, Panel } from "@/components/page-ui";
 import { getCase } from "./get-case";
 
 function Block({
@@ -16,27 +17,13 @@ function Block({
   children: React.ReactNode;
 }) {
   return (
-    <section>
-      <h2 className="mb-2 text-sm font-medium">{title}</h2>
-      <dl className="divide-y rounded-xl border">{children}</dl>
-    </section>
+    <Panel title={title}>
+      <dl>{children}</dl>
+    </Panel>
   );
 }
 
-function Row({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="grid grid-cols-[9rem_1fr] gap-3 px-4 py-2.5 text-sm sm:grid-cols-[12rem_1fr]">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
-    </div>
-  );
-}
+const Row = KeyRow;
 
 function listOrNone(values: string[], labels: Record<string, string>) {
   return values.length > 0
@@ -61,12 +48,21 @@ export default async function CaseInfoPage({
   const createdAt = new Date(c.created_at).toLocaleDateString("fr-FR");
 
   return (
-    <div className="space-y-6">
+    <div className="grid items-start gap-5 md:grid-cols-2">
+      <div className="space-y-5">
       <Block title="Identité">
         <Row label="Date de naissance">{birthDate}</Row>
         <Row label="Téléphone">{c.phone}</Row>
         <Row label="E-mail">{c.email ?? "—"}</Row>
       </Block>
+
+      <Block title="Dossier">
+        <Row label="Prestation">{SCOPE_LABELS[c.scope] ?? c.scope}</Row>
+        <Row label="Procédure">{procedureLabel(c.main_track, c.schools)}</Row>
+        <Row label="Responsable">{responsible ?? "—"}</Row>
+        <Row label="Créé le">{createdAt}</Row>
+      </Block>
+      </div>
 
       <Block title="Parcours">
         <Row label="Niveau d'études actuel">
@@ -80,12 +76,6 @@ export default async function CaseInfoPage({
         </Row>
       </Block>
 
-      <Block title="Dossier">
-        <Row label="Prestation">{SCOPE_LABELS[c.scope] ?? c.scope}</Row>
-        <Row label="Procédure">{procedureLabel(c.main_track, c.schools)}</Row>
-        <Row label="Responsable">{responsible ?? "—"}</Row>
-        <Row label="Créé le">{createdAt}</Row>
-      </Block>
     </div>
   );
 }

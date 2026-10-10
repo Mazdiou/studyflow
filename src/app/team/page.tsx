@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
+import { AppShell } from "@/components/shell/app-shell";
+import { PageHeader, Panel, StatusPill } from "@/components/page-ui";
 import { DeleteEmployeeButton } from "./delete-employee-button";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -28,49 +29,69 @@ export default async function TeamPage() {
     }),
   );
 
+  const list = members ?? [];
+
   return (
-    <main className="mx-auto max-w-3xl space-y-8 p-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Équipe</h1>
-        <Link href="/dashboard" className="text-sm underline">
-          Retour au tableau de bord
-        </Link>
+    <AppShell>
+      <div className="mx-auto max-w-4xl p-4 md:p-8">
+        <PageHeader
+          title="Équipe"
+          subtitle={`${list.length} membre${list.length > 1 ? "s" : ""}`}
+        />
+
+        <div className="space-y-5">
+          <Panel title="Membres">
+            <ul>
+              {list.map((m) => (
+                <li
+                  key={m.id}
+                  className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-[18px] py-3 last:border-b-0"
+                >
+                  <span
+                    aria-hidden
+                    className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-xs font-semibold text-accent-foreground"
+                  >
+                    {`${m.first_name[0] ?? ""}${m.last_name[0] ?? ""}`.toUpperCase()}
+                  </span>
+                  <div className="min-w-0 flex-1 basis-48">
+                    <p className="truncate text-sm font-medium">
+                      {m.first_name} {m.last_name}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {emails.get(m.id) ?? ""}
+                    </p>
+                  </div>
+                  <span className="w-20 text-sm text-muted-foreground max-md:hidden">
+                    {m.role === "owner" ? "Patron" : "Employé"}
+                  </span>
+                  <span className="w-24">
+                    <StatusPill tone={m.is_active ? "ok" : "off"}>
+                      {m.is_active ? "Actif" : "Désactivé"}
+                    </StatusPill>
+                  </span>
+                  <div className="flex min-w-44 justify-end gap-2 max-md:w-full max-md:justify-start">
+                    {m.id !== caller.user.id && (
+                      <>
+                        {m.role === "employee" && !m.is_active && (
+                          <DeleteEmployeeButton
+                            id={m.id}
+                            name={`${m.first_name} ${m.last_name}`}
+                          />
+                        )}
+                        <ToggleActiveButton id={m.id} isActive={m.is_active} />
+                      </>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+
+          <Panel title="Ajouter un employé">
+            <AddEmployeeForm />
+          </Panel>
+        </div>
       </div>
-
-      <ul className="divide-y rounded-md border">
-        {(members ?? []).map((m) => (
-          <li key={m.id} className="flex items-center justify-between p-4">
-            <div>
-              <p className="font-medium">
-                {m.first_name} {m.last_name}{" "}
-                <span className="text-sm text-muted-foreground">
-                  ({m.role === "owner" ? "patron" : "employé"})
-                </span>
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {emails.get(m.id) ?? ""}
-                {!m.is_active && " · désactivé"}
-              </p>
-            </div>
-            {m.id !== caller.user.id && (
-              <div className="flex gap-2">
-                <ToggleActiveButton id={m.id} isActive={m.is_active} />
-                {m.role === "employee" && !m.is_active && (
-                  <DeleteEmployeeButton
-                    id={m.id}
-                    name={`${m.first_name} ${m.last_name}`}
-                  />
-                )}
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Ajouter un employé</h2>
-        <AddEmployeeForm />
-      </section>
-    </main>
+    </AppShell>
   );
 }

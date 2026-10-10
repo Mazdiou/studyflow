@@ -6,6 +6,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch {
+          // copie impossible : le mot de passe reste affiché
+        }
+      }}
+    >
+      {copied ? "Copié" : "Copier"}
+    </Button>
+  );
+}
+
 export function AddEmployeeForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -45,19 +67,19 @@ export function AddEmployeeForm() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-[18px]">
       <form onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-1">
           <Label htmlFor="firstName">Prénom</Label>
-          <Input id="firstName" name="firstName" required />
+          <Input id="firstName" name="firstName" placeholder="Prénom" required />
         </div>
         <div className="space-y-1">
           <Label htmlFor="lastName">Nom</Label>
-          <Input id="lastName" name="lastName" required />
+          <Input id="lastName" name="lastName" placeholder="Nom" required />
         </div>
         <div className="space-y-1">
           <Label htmlFor="email">E-mail</Label>
-          <Input id="email" name="email" type="email" required />
+          <Input id="email" name="email" type="email" placeholder="e-mail@exemple.com" required />
         </div>
         <div className="sm:col-span-3">
           <Button type="submit" disabled={loading}>
@@ -66,19 +88,26 @@ export function AddEmployeeForm() {
         </div>
       </form>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       {created && (
-        <div className="rounded-md border border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-medium">Compte créé pour {created.email}</p>
-          <p className="mt-1">
-            Mot de passe temporaire :{" "}
-            <code className="font-mono text-base">{created.password}</code>
-          </p>
-          <p className="mt-1">
-            Notez-le maintenant : il ne sera plus affiché. L&apos;employé devra en
-            choisir un nouveau à sa première connexion.
-          </p>
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary bg-highlight px-4 py-3 text-sm"
+        >
+          <div className="min-w-0">
+            <p className="font-medium">Compte créé pour {created.email}</p>
+            <p className="text-muted-foreground">
+              Notez ce mot de passe maintenant : il ne sera plus affiché.
+              L&apos;employé en choisira un nouveau à sa première connexion.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="rounded-lg border bg-card px-3 py-2 font-mono text-[13px]">
+              {created.password}
+            </code>
+            <CopyButton value={created.password} />
+          </div>
         </div>
       )}
     </div>

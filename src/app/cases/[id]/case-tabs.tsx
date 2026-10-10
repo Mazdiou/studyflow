@@ -16,7 +16,7 @@ export function CaseTabs({ id, isOwner }: { id: string; isOwner: boolean }) {
   const base = `/cases/${id}`;
 
   return (
-    <nav aria-label="Sections du dossier" className="mt-3 flex gap-5">
+    <nav aria-label="Sections du dossier" className="mt-4 flex gap-6 overflow-x-auto">
       {TABS.filter((t) => isOwner || !t.ownerOnly).map((t) => {
         const href = base + t.suffix;
         const active =
@@ -29,7 +29,7 @@ export function CaseTabs({ id, isOwner }: { id: string; isOwner: boolean }) {
             className={cn(
               "-mb-px border-b-2 py-2.5 text-sm transition-colors",
               active
-                ? "border-foreground font-medium text-foreground"
+                ? "border-primary font-medium text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >

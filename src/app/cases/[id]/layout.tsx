@@ -15,7 +15,7 @@ import { StatusButtons } from "./status-buttons";
 import { CaseTabs } from "./case-tabs";
 
 const BADGE: Record<string, string> = {
-  active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  active: "bg-success-bg text-success",
   closed: "bg-muted text-muted-foreground",
   abandoned: "bg-red-500/10 text-red-700 dark:text-red-400",
 };
@@ -48,11 +48,17 @@ export default async function CaseLayout({
     <div>
       {/* En-tête fixe, partagé par tous les onglets */}
       <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto max-w-4xl px-6 pt-5">
+        <div className="mx-auto max-w-5xl px-4 pt-5 md:px-8">
+          <Link
+            href="/cases"
+            className="mb-3 inline-flex h-8 items-center rounded-lg border px-3 text-sm md:hidden"
+          >
+            ← Dossiers
+          </Link>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="truncate text-xl font-semibold tracking-tight">
+                <h1 className="truncate text-[22px] font-semibold tracking-tight">
                   {displayName(c.first_name, c.last_name)}
                 </h1>
                 <span
@@ -88,7 +94,7 @@ export default async function CaseLayout({
         </div>
       </header>
 
-      <div className="mx-auto max-w-4xl px-6 py-6">{children}</div>
+      <div className="mx-auto max-w-5xl px-4 py-6 md:px-8">{children}</div>
     </div>
   );
 }

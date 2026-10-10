@@ -1,7 +1,8 @@
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchCampaignCases } from "@/lib/case-tree-data";
-import { requireMember } from "@/lib/auth/require-member";
+import { AppRail } from "@/components/shell/app-rail";
+import { getShellUser } from "@/components/shell/app-shell";
+import { CasesContent } from "./cases-content";
 import {
   CaseTree,
   type TreeCampaign,
@@ -14,8 +15,7 @@ export default async function CasesLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const caller = await requireMember();
-  if (!caller) redirect("/login");
+  const { caller, isOwner, initials } = await getShellUser();
 
   // Lecture via le RLS : seuls les dossiers et membres de l'agence reviennent.
   const supabase = await createClient();
@@ -49,15 +49,18 @@ export default async function CasesLayout({
   }
 
   return (
-    <div className="flex h-dvh overflow-hidden">
-      <CaseTree
-        campaigns={campaigns}
-        cases={cases}
-        loadedCampaignIds={current ? [current.id] : []}
-        members={(membersRes.data ?? []) as TreeMember[]}
-        currentUserId={caller.user.id}
-      />
-      <div className="min-w-0 flex-1 overflow-y-auto">{children}</div>
+    <div className="flex h-dvh flex-col-reverse overflow-hidden md:flex-row">
+      <AppRail isOwner={isOwner} initials={initials} />
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <CaseTree
+          campaigns={campaigns}
+          cases={cases}
+          loadedCampaignIds={current ? [current.id] : []}
+          members={(membersRes.data ?? []) as TreeMember[]}
+          currentUserId={caller.user.id}
+        />
+        <CasesContent>{children}</CasesContent>
+      </div>
     </div>
   );
 }

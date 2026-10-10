@@ -6,7 +6,6 @@ import { useParams } from "next/navigation";
 import {
   ChevronDown,
   ChevronRight,
-  LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -15,7 +14,6 @@ import {
   X,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { LEVEL_LABELS, LEVEL_ORDER, displayName } from "@/lib/case-labels";
 import { normalizeName } from "@/lib/names";
 import { cn } from "@/lib/utils";
@@ -71,7 +69,7 @@ function byLevel(a: TreeCase, b: TreeCase) {
 }
 
 const selectClass =
-  "h-7 min-w-0 flex-1 rounded-lg border bg-background px-2 text-xs outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
+  "h-8 min-w-0 flex-1 rounded-lg border bg-card px-2 text-xs outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
 
 export function CaseTree({
   campaigns,
@@ -99,6 +97,11 @@ export function CaseTree({
   // Ctrl+B (ou Cmd+B) : replier / ouvrir le panneau, comme dans VS Code
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPrefs((p) => (p.collapsed ? { collapsed: false } : p));
+        setTimeout(() => searchRef.current?.focus(), 0);
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         setPrefs((p) => ({ collapsed: !p.collapsed }));
@@ -212,6 +215,10 @@ export function CaseTree({
   }
 
   const found = cases.filter(matches);
+  const allCount = cases.filter((c) => c.status === "active").length;
+  const mineCount = cases.filter(
+    (c) => c.status === "active" && c.assigned_to === currentUserId,
+  ).length;
   const resultCount = found.filter(
     (c) => searching || c.status === "active",
   ).length;
@@ -249,7 +256,7 @@ export function CaseTree({
   // --- Panneau replié : une fine barre d'icônes ---
   if (prefs.collapsed) {
     return (
-      <aside className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r bg-muted/30 py-2">
+      <aside className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r bg-sidebar py-2">
         <Button
           variant="ghost"
           size="icon-sm"
@@ -267,17 +274,6 @@ export function CaseTree({
         >
           <Plus />
         </Link>
-        <div className="mt-auto flex flex-col items-center gap-1">
-          <Link
-            href="/dashboard"
-            aria-label="Tableau de bord"
-            title="Tableau de bord"
-            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-          >
-            <LayoutDashboard />
-          </Link>
-          <ThemeToggle />
-        </div>
       </aside>
     );
   }
@@ -285,18 +281,23 @@ export function CaseTree({
   return (
     <>
       <aside
-        style={{ width }}
-        className="relative flex h-full shrink-0 flex-col bg-muted/30"
+        style={{ "--tree-w": `${width}px` } as React.CSSProperties}
+        className={cn(
+          "relative flex h-full w-full shrink-0 flex-col bg-sidebar md:w-(--tree-w)",
+          selectedId && "max-md:hidden",
+        )}
       >
         {/* En-tête */}
-        <div className="flex items-center gap-1 px-3 pt-3 pb-2">
+        <div className="flex items-center gap-1 px-4 pt-4 pb-3">
           <Link
             href="/cases"
-            className="flex-1 truncate text-sm font-semibold tracking-tight"
+            className="truncate text-base font-semibold tracking-tight"
           >
             StudyFlow
           </Link>
-          <ThemeToggle />
+          <kbd className="ml-auto mr-1 text-[11px] text-muted-foreground max-md:hidden">
+            Ctrl B
+          </kbd>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -353,9 +354,9 @@ export function CaseTree({
         )}
 
         {/* Recherche */}
-        <div className="px-3">
+        <div className="px-4">
           <div className="relative">
-            <Search className="pointer-events-none absolute top-2 left-2.5 size-4 text-muted-foreground" />
+            <Search className="pointer-events-none absolute top-3 left-3 size-4 text-muted-foreground" />
             <input
               ref={searchRef}
               value={query}
@@ -363,10 +364,15 @@ export function CaseTree({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setQuery("");
               }}
-              placeholder="Nom, prénom ou téléphone"
+              placeholder="Rechercher"
               aria-label="Rechercher un dossier"
-              className="h-8 w-full rounded-lg border bg-background pr-8 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="h-10 w-full rounded-lg border bg-card pr-16 pl-9 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
             />
+            {!query && (
+              <kbd className="pointer-events-none absolute top-2.5 right-2.5 rounded-md border px-1.5 text-[11px] text-muted-foreground max-md:hidden">
+                Ctrl K
+              </kbd>
+            )}
             {query && (
               <button
                 type="button"
@@ -375,7 +381,7 @@ export function CaseTree({
                   searchRef.current?.focus();
                 }}
                 aria-label="Effacer la recherche"
-                className="absolute top-1.5 right-1.5 grid size-5 place-items-center rounded text-muted-foreground hover:bg-muted"
+                className="absolute top-2.5 right-2.5 grid size-5 place-items-center rounded text-muted-foreground hover:bg-muted"
               >
                 <X className="size-3.5" />
               </button>
@@ -392,22 +398,32 @@ export function CaseTree({
         )}
 
         {/* Filtres */}
-        <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2 pb-2">
-          <button
-            type="button"
-            aria-pressed={prefs.mine}
-            onClick={() =>
-              setPrefs({ mine: !prefs.mine, responsible: "" })
-            }
-            className={cn(
-              "h-7 rounded-full border px-3 text-xs transition-colors",
-              prefs.mine
-                ? "border-primary bg-primary text-primary-foreground"
-                : "bg-background hover:bg-muted",
-            )}
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3 pb-2">
+          <div
+            role="group"
+            aria-label="Portée des dossiers"
+            className="mb-1 flex w-full rounded-xl bg-muted p-[3px]"
           >
-            Mes dossiers
-          </button>
+            {[
+              { mine: false, label: "Tous", n: allCount },
+              { mine: true, label: "Mes dossiers", n: mineCount },
+            ].map((opt) => (
+              <button
+                key={opt.label}
+                type="button"
+                aria-pressed={prefs.mine === opt.mine}
+                onClick={() => setPrefs({ mine: opt.mine, responsible: "" })}
+                className={cn(
+                  "h-8 flex-1 rounded-[9px] text-sm transition-colors",
+                  prefs.mine === opt.mine
+                    ? "bg-card font-medium text-foreground ring-1 ring-border"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {opt.label} <span className="tabular-nums">{opt.n}</span>
+              </button>
+            ))}
+          </div>
           <select
             value={prefs.level}
             onChange={(e) => setPrefs({ level: e.target.value })}
@@ -487,7 +503,7 @@ export function CaseTree({
                       open: { ...p.open, [camp.id]: !campOpen },
                     }))
                   }
-                  className="flex w-full items-center gap-1 px-2 py-1.5 text-left text-sm font-medium hover:bg-muted"
+                  className="flex w-full items-center gap-1 px-3 py-2 text-left text-[11px] font-medium tracking-wide text-muted-foreground uppercase hover:bg-muted/60"
                 >
                   {campOpen ? (
                     <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
@@ -550,7 +566,7 @@ export function CaseTree({
                               open: { ...p.open, [key]: !folderOpen },
                             }))
                           }
-                          className="flex w-full items-center gap-1 py-1 pr-3 pl-6 text-left text-sm hover:bg-muted"
+                          className="flex w-full items-center gap-1 py-1.5 pr-4 pl-4 text-left text-sm font-medium hover:bg-muted/60"
                         >
                           {folderOpen ? (
                             <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
@@ -573,7 +589,7 @@ export function CaseTree({
                                 href={`/cases/${c.id}`}
                                 aria-current={isSelected ? "page" : undefined}
                                 className={cn(
-                                  "mx-1.5 flex items-center gap-2 rounded-md py-1 pr-2 pl-9 text-sm hover:bg-muted",
+                                  "mx-3 flex items-center gap-2 rounded-lg py-1.5 pr-2 pl-8 text-sm hover:bg-muted/60",
                                   isSelected &&
                                     "bg-accent font-medium text-accent-foreground",
                                   c.status !== "active" &&
@@ -606,20 +622,9 @@ export function CaseTree({
         </nav>
 
         {/* Pied */}
-        <div className="flex items-center gap-2 border-t p-3">
-          <Link
-            href="/cases/new"
-            className={cn(buttonVariants(), "flex-1")}
-          >
+        <div className="p-4">
+          <Link href="/cases/new" className={cn(buttonVariants(), "w-full")}>
             <Plus /> Nouveau dossier
-          </Link>
-          <Link
-            href="/dashboard"
-            aria-label="Tableau de bord"
-            title="Tableau de bord"
-            className={buttonVariants({ variant: "outline", size: "icon" })}
-          >
-            <LayoutDashboard />
           </Link>
         </div>
       </aside>
@@ -637,7 +642,7 @@ export function CaseTree({
           if (e.key === "ArrowLeft") setPrefs({ width: width - 16 });
           if (e.key === "ArrowRight") setPrefs({ width: width + 16 });
         }}
-        className="w-px shrink-0 cursor-col-resize bg-border outline-none transition-colors hover:w-0.5 hover:bg-primary/40 focus-visible:w-0.5 focus-visible:bg-ring"
+        className="hidden w-px shrink-0 cursor-col-resize md:block bg-border outline-none transition-colors hover:w-0.5 hover:bg-primary/40 focus-visible:w-0.5 focus-visible:bg-ring"
       />
     </>
   );
