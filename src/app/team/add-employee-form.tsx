@@ -76,7 +76,7 @@ export function AddEmployeeForm() {
             <code className="font-mono text-base">{created.password}</code>
           </p>
           <p className="mt-1">
-            Notez-le maintenant : il ne sera plus affiché. L'employé devra en
+            Notez-le maintenant : il ne sera plus affiché. L&apos;employé devra en
             choisir un nouveau à sa première connexion.
           </p>
         </div>

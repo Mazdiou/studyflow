@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { safely } from "@/lib/api-errors";
 
 const schema = z.object({ password: z.string().min(8).max(72) });
 
-export async function POST(request: Request) {
+async function changePassword(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -51,4 +52,8 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+export async function POST(request: Request) {
+  return safely("change-password", () => changePassword(request));
 }

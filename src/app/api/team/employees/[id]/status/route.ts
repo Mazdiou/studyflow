@@ -3,13 +3,11 @@ import { z } from "zod";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logActivity } from "@/lib/audit";
+import { safely } from "@/lib/api-errors";
 
 const schema = z.object({ isActive: z.boolean() });
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+async function setActive(request: Request, params: Promise<{ id: string }>) {
   const caller = await requireOwner();
   if (!caller) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
@@ -99,4 +97,11 @@ export async function PATCH(
   });
 
   return NextResponse.json({ ok: true });
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  return safely("team status", () => setActive(request, params));
 }

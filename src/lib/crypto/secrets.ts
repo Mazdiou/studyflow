@@ -1,16 +1,11 @@
 import "server-only";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { serverEnv } from "@/lib/env-server";
 
 const KEY_VERSION = 1;
 
 function getKey(): Buffer {
-  const raw = process.env.PASTEL_ENCRYPTION_KEY;
-  if (!raw) throw new Error("PASTEL_ENCRYPTION_KEY manquante");
-  const key = Buffer.from(raw, "base64");
-  if (key.length !== 32) {
-    throw new Error("PASTEL_ENCRYPTION_KEY doit faire 32 octets (base64)");
-  }
-  return key;
+  return serverEnv().pastelKey;
 }
 
 // `aad` lie le texte chiffré à son dossier : une valeur copiée dans la ligne

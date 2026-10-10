@@ -1,14 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { publicEnv } from "@/lib/env";
 
 const PUBLIC_PATHS = ["/login", "/register"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
+  const env = publicEnv();
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    env.supabaseUrl,
+    env.supabaseKey,
     {
       cookies: {
         getAll() {

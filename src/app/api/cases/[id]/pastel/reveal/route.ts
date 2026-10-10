@@ -38,6 +38,18 @@ async function reveal(id: string) {
   }
   if (!row) return fail("Aucun mot de passe enregistré pour ce dossier", 404);
 
+  // Journal D'ABORD : si la trace ne peut pas être écrite, rien n'est déchiffré
+  // ni renvoyé. (logActivity ne lève pas d'erreur : elle renvoie false.)
+  const logged = await logActivity(admin, {
+    agencyId,
+    actorId: caller.user.id,
+    action: "pastel.password_viewed",
+    targetType: "case",
+    targetId: id,
+    caseId: id,
+  });
+  if (!logged) return fail("Journal indisponible, réessayez dans un instant", 503);
+
   let password: string;
   try {
     password = decryptSecret(row.password_encrypted, `${agencyId}:${id}`);
@@ -49,16 +61,6 @@ async function reveal(id: string) {
     );
     return fail("Impossible de lire le mot de passe", 500);
   }
-
-  // Journal AVANT l'affichage : si l'écriture échoue, l'appel rejettera.
-  await logActivity(admin, {
-    agencyId,
-    actorId: caller.user.id,
-    action: "pastel.password_viewed",
-    targetType: "case",
-    targetId: id,
-    caseId: id,
-  });
 
   return NextResponse.json({ password }, { headers: NO_STORE });
 }

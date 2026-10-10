@@ -34,7 +34,7 @@ export default async function DashboardPage() {
       {profile?.role === "owner" && (
         <p>
           <Link href="/team" className="underline">
-            Gérer l'équipe
+            Gérer l&apos;équipe
           </Link>
         </p>
       )}

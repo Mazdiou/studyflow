@@ -41,7 +41,8 @@ export default function RegisterPage() {
       return setError("Les mots de passe ne correspondent pas.");
 
     setLoading(true);
-    const { confirm, ...payload } = data;
+    const payload = { ...data };
+    delete payload.confirm;
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

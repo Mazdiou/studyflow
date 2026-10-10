@@ -3,11 +3,9 @@ import { z } from "zod";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logActivity } from "@/lib/audit";
+import { safely } from "@/lib/api-errors";
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+async function removeEmployee(params: Promise<{ id: string }>) {
   const caller = await requireOwner();
   if (!caller) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
@@ -77,4 +75,11 @@ export async function DELETE(
   });
 
   return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  return safely("team delete", () => removeEmployee(params));
 }

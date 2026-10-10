@@ -1,5 +1,5 @@
 begin;
-select plan(11);
+select plan(16);
 
 -- Données de test : agence A (patron a1, employé a2), agence B (patron b1)
 insert into auth.users (id, email) values
@@ -44,8 +44,19 @@ select throws_ok(
       gen_random_uuid(), 'Pirate', 'X', '000', 'P', 'P')$$,
   '42501', null, 'un utilisateur connecté ne peut pas appeler create_agency_with_owner');
 
--- Tentative de modifier l'agence B (doit n'affecter aucune ligne)
-update public.agencies set name = 'Piratee' where name = 'Agence B';
+-- Plus aucun droit d'écriture direct : refus net (42501), pas seulement 0 ligne
+select throws_ok(
+  $$update public.agencies set name = 'Piratee' where name = 'Agence B'$$,
+  '42501', null, 'patron A n''a aucun droit d''écriture direct sur agencies');
+select throws_ok(
+  $$update public.profiles set is_active = false
+    where id = '11111111-1111-1111-1111-111111111111'$$,
+  '42501', null, 'le patron ne peut pas se désactiver lui-même depuis le navigateur');
+select throws_ok(
+  $$update public.agencies set name = 'Autre nom'
+    where id = (select agency_id from public.profiles
+                where id = '11111111-1111-1111-1111-111111111111')$$,
+  '42501', null, 'le patron ne peut pas renommer son agence depuis le navigateur');
 reset role;
 select is((select count(*) from public.agencies where name = 'Piratee'), 0::bigint,
   'patron A ne peut pas modifier l''agence B');
@@ -55,17 +66,21 @@ select set_config('request.jwt.claims',
   '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}', true);
 set local role authenticated;
 
-update public.profiles set is_active = false
-  where id = '11111111-1111-1111-1111-111111111111';
+select throws_ok(
+  $$update public.profiles set is_active = false
+    where id = '11111111-1111-1111-1111-111111111111'$$,
+  '42501', null, 'un employé n''a aucun droit d''écriture direct sur profiles');
 reset role;
 select is((select is_active from public.profiles
            where id = '11111111-1111-1111-1111-111111111111'), true,
   'un employé ne peut pas désactiver le patron');
 
 set local role authenticated;
-update public.agencies set name = 'Piratee 2'
-  where id = (select agency_id from public.profiles
-              where id = '11111111-1111-1111-1111-111111111111');
+select throws_ok(
+  $$update public.agencies set name = 'Piratee 2'
+    where id = (select agency_id from public.profiles
+                where id = '11111111-1111-1111-1111-111111111111')$$,
+  '42501', null, 'un employé n''a aucun droit d''écriture direct sur agencies');
 reset role;
 select is((select count(*) from public.agencies where name = 'Piratee 2'), 0::bigint,
   'un employé ne peut pas modifier son agence');

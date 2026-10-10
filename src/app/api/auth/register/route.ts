@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logActivity } from "@/lib/audit";
+import { safely } from "@/lib/api-errors";
 
 const schema = z.object({
   agencyName: z.string().trim().min(1).max(100),
@@ -13,7 +14,7 @@ const schema = z.object({
   password: z.string().min(8).max(72),
 });
 
-export async function POST(request: Request) {
+async function register(request: Request) {
   let body: unknown;
   try {
     body = await request.json();
@@ -77,4 +78,8 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ ok: true }, { status: 201 });
+}
+
+export async function POST(request: Request) {
+  return safely("register", () => register(request));
 }
